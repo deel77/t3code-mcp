@@ -1,0 +1,30 @@
+[Unit]
+Description=T3Code MCP bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=t3code-mcp
+Group=t3code-mcp
+WorkingDirectory=/opt/t3code-mcp
+Environment=T3_BASE_URL=http://127.0.0.1:3773
+Environment=T3_TOKEN_FILE=/var/lib/t3code-mcp/token
+Environment=T3_MCP_HOST=127.0.0.1
+Environment=T3_MCP_PORT=3993
+EnvironmentFile=/etc/t3code-mcp/access.env
+ExecStart=/usr/bin/env node /opt/t3code-mcp/src/index.mjs
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

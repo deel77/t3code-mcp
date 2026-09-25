@@ -1,0 +1,21 @@
+[Unit]
+Description=Refresh T3Code MCP orchestration credential
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=t3code-mcp
+Group=t3code-mcp
+WorkingDirectory=/opt/t3code-mcp
+Environment=T3_BASE_URL=http://127.0.0.1:3773
+Environment=T3_TOKEN_FILE=/var/lib/t3code-mcp/token
+ExecStart=/usr/bin/env node /opt/t3code-mcp/scripts/refresh-token.mjs
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true

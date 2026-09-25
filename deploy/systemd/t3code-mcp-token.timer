@@ -1,0 +1,10 @@
+[Unit]
+Description=Check T3Code MCP credential daily
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+Unit=t3code-mcp-token.service
+
+[Install]
+WantedBy=timers.target
