@@ -29,6 +29,12 @@ const newThreadModel = (shell, project) => project.defaultModelSelection
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]?.modelSelection
   ?? null;
 
+const backgroundLiveness = (thread) => ["working", "monitoring"].includes(thread.backgroundLiveness)
+  ? thread.backgroundLiveness : null;
+const activityStatus = (thread) => backgroundLiveness(thread)
+  ?? (thread.latestTurn?.state === "running" || thread.session?.status === "running" ? "running"
+    : thread.latestTurn?.state ?? thread.session?.status ?? null);
+
 const threadSummary = (thread, providers = []) => ({
   id: thread.id,
   project_id: thread.projectId,
@@ -36,6 +42,8 @@ const threadSummary = (thread, providers = []) => ({
   updated_at: thread.updatedAt,
   turn_state: thread.latestTurn?.state ?? null,
   session_status: thread.session?.status ?? null,
+  background_liveness: backgroundLiveness(thread),
+  activity_status: activityStatus(thread),
   runtime_mode: thread.runtimeMode ?? null,
   needs_approval: Boolean(thread.hasPendingApprovals),
   needs_user_input: Boolean(thread.hasPendingUserInput),
@@ -79,6 +87,7 @@ const cursorFor = (thread, detail) => encodeCursor({
   message_marker: latestMessageMarker(detail.thread?.messages ?? []),
   turn_state: thread.latestTurn?.state ?? null,
   session_status: thread.session?.status ?? null,
+  background_liveness: backgroundLiveness(thread),
   needs_approval: Boolean(thread.hasPendingApprovals),
   needs_user_input: Boolean(thread.hasPendingUserInput),
   updated_at: thread.updatedAt,
@@ -295,6 +304,7 @@ export class T3Client {
     const safeLimit = Math.min(Math.max(messageLimit, 1), 30);
     const stateChanged = previous.turn_state !== (thread.latestTurn?.state ?? null)
       || previous.session_status !== (thread.session?.status ?? null)
+      || previous.background_liveness !== backgroundLiveness(thread)
       || previous.needs_approval !== Boolean(thread.hasPendingApprovals)
       || previous.needs_user_input !== Boolean(thread.hasPendingUserInput);
     return {

@@ -24,6 +24,8 @@
 
 `get_thread_updates` uses T3Code's sequenced WebSocket replay. If it returns `resync_required: true`, call `get_thread` for a fresh cursor. A cursor belongs to one thread.
 
+Thread summaries and details include `turn_state`, `session_status`, `background_liveness`, and `activity_status`. `turn_state` is the latest turn's state. T3Code can mark a turn `completed` while background subagents or workflows keep running. `background_liveness` is `working`, `monitoring`, or `null`; `monitoring` means only watch loops remain. `activity_status` puts live background work ahead of the latest turn state, so use it when telling someone whether the thread is finished. `get_thread_updates` sets `state_changed` when background liveness changes, even without a new message.
+
 ## Voice check-in flow
 
 1. Call `list_attention` for blocked work or `list_recent_threads` for recent activity.

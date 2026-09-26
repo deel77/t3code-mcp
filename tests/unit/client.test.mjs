@@ -192,3 +192,51 @@ test("get_thread_updates returns only messages changed since its cursor and repo
   assert.equal(Object.hasOwn(update, "current_turn_model"), false);
   assert.notEqual(update.updates_cursor, baseline.updates_cursor);
 });
+
+test("completed turns keep reporting live background work and its later monitoring transition", async () => {
+  const projectId = randomUUID();
+  const threadId = randomUUID();
+  let backgroundLiveness = null;
+  const client = new T3Client({
+    baseUrl: "http://127.0.0.1:3773", tokenFile,
+    rpcImpl: async (_connection, method) => {
+      assert.equal(method, "orchestration.subscribeThread");
+      return [{ kind: "synchronized" }];
+    },
+    fetchImpl: async (url) => {
+      if (url.pathname === "/api/orchestration/shell") return Response.json({
+        projects: [{ id: projectId, title: "Example" }],
+        threads: [{ id: threadId, projectId, title: "Background task", updatedAt: "2025-01-02T00:00:00Z",
+          latestTurn: { turnId: "turn-1", state: "completed" }, session: { status: "ready" },
+          backgroundLiveness }],
+      });
+      if (url.pathname === `/api/orchestration/threads/${threadId}`) return Response.json({
+        snapshotSequence: 1, thread: { messages: [], activities: [], session: { lastError: null } },
+        page: { hasMore: false },
+      });
+      throw new Error(`Unexpected request: ${url.pathname}`);
+    },
+  });
+  const [listed] = (await client.listRecentThreads(1)).threads;
+  assert.equal(listed.activity_status, "completed");
+  assert.equal(listed.background_liveness, null);
+  const baseline = await client.getThread(threadId, 1);
+
+  backgroundLiveness = "working";
+  const working = await client.getThreadUpdates(threadId, baseline.updates_cursor, 1);
+  assert.equal(working.turn_state, "completed");
+  assert.equal(working.background_liveness, "working");
+  assert.equal(working.activity_status, "working");
+  assert.equal(working.state_changed, true);
+
+  backgroundLiveness = "monitoring";
+  const monitoring = await client.getThreadUpdates(threadId, working.updates_cursor, 1);
+  assert.equal(monitoring.background_liveness, "monitoring");
+  assert.equal(monitoring.activity_status, "monitoring");
+  assert.equal(monitoring.state_changed, true);
+
+  backgroundLiveness = null;
+  const completed = await client.getThreadUpdates(threadId, monitoring.updates_cursor, 1);
+  assert.equal(completed.activity_status, "completed");
+  assert.equal(completed.state_changed, true);
+});

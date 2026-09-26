@@ -14,7 +14,7 @@ const runtimeModeSchema = z.enum(["full-access", "approval-required", "auto-acce
 export function createMcpServer(client) {
   const server = new McpServer(
     { name: "t3code-voice", version: packageJson.version },
-    { instructions: "For voice check-ins use list_attention, list_recent_threads and get_thread_updates. Use find_thread to locate a title across projects. Get a cursor from get_thread, then pass it to get_thread_updates for new messages and state changes. next_turn_model is the configured selection for a future turn; T3Code does not expose the actual model or reasoning level of the current turn. Use list_model_options before requesting a model override. Answer questions with answer_thread_input using exact option values. Read pending_approvals before using respond_thread_approval and ask the user to authorize the exact action. Start coding work only when the user asks." },
+    { instructions: "For voice check-ins use list_attention, list_recent_threads and get_thread_updates. Use find_thread to locate a title across projects. Get a cursor from get_thread, then pass it to get_thread_updates for new messages and state changes. Use activity_status for overall progress: turn_state can be completed while background_liveness is working or monitoring. next_turn_model is the configured selection for a future turn; T3Code does not expose the actual model or reasoning level of the current turn. Use list_model_options before requesting a model override. Answer questions with answer_thread_input using exact option values. Read pending_approvals before using respond_thread_approval and ask the user to authorize the exact action. Start coding work only when the user asks." },
   );
 
   const result = (value) => ({
@@ -40,14 +40,14 @@ export function createMcpServer(client) {
 
   server.registerTool("list_threads", {
     title: "List T3Code threads",
-    description: "List recent unarchived threads in a project, including attention status and configured next-turn model.",
+    description: "List recent unarchived threads in a project, including activity_status, background_liveness, attention status and configured next-turn model.",
     inputSchema: { project_id: z.string().min(1), limit: z.number().int().min(1).max(30).optional() },
     annotations: { readOnlyHint: true, openWorldHint: false },
   }, handle(({ project_id, limit }) => client.listThreads(project_id, limit)));
 
   server.registerTool("list_recent_threads", {
     title: "List recently changed T3Code threads",
-    description: "Find recently updated unarchived threads across projects, with project names, status, and configured next-turn model. No project ID is needed.",
+    description: "Find recently updated unarchived threads across projects, with project names, activity_status, background_liveness and configured next-turn model. No project ID is needed.",
     inputSchema: { limit: z.number().int().min(1).max(30).optional() },
     annotations: { readOnlyHint: true, openWorldHint: false },
   }, handle(({ limit }) => client.listRecentThreads(limit)));
@@ -61,21 +61,21 @@ export function createMcpServer(client) {
 
   server.registerTool("find_thread", {
     title: "Find a T3Code thread",
-    description: "Search thread titles across every owned project without a project ID. Optionally also search user and assistant message text.",
+    description: "Search thread titles across every owned project without a project ID. Results include activity_status and background_liveness. Optionally also search user and assistant message text.",
     inputSchema: { query: z.string().min(1).max(200), limit: z.number().int().min(1).max(30).optional(), search_messages: z.boolean().optional() },
     annotations: { readOnlyHint: true, openWorldHint: false },
   }, handle(({ query, limit, search_messages }) => client.findThread(query, limit, search_messages)));
 
   server.registerTool("get_thread", {
     title: "Check a T3Code thread",
-    description: "Read latest messages, status, configured next-turn model, unanswered questions, pending approvals, and a cursor for get_thread_updates. Approval details include request ID, action, type, options, and thread context.",
+    description: "Read latest messages, activity_status, background_liveness, configured next-turn model, unanswered questions, pending approvals, and a cursor for get_thread_updates. A completed turn may still have live background work. Approval details include request ID, action, type, options, and thread context.",
     inputSchema: { thread_id: z.string().min(1), message_limit: z.number().int().min(1).max(30).optional() },
     annotations: { readOnlyHint: true, openWorldHint: false },
   }, handle(({ thread_id, message_limit }) => client.getThread(thread_id, message_limit)));
 
   server.registerTool("get_thread_updates", {
     title: "Check new T3Code thread updates",
-    description: "Return messages changed since the cursor from get_thread or the prior get_thread_updates, plus status, pending input, and pending approvals. If resync_required is true, call get_thread for full context.",
+    description: "Return messages changed since the cursor from get_thread or the prior get_thread_updates, plus activity_status, background_liveness, pending input, and pending approvals. Background work changes count as state_changed. If resync_required is true, call get_thread for full context.",
     inputSchema: { thread_id: z.string().min(1), cursor: z.string().min(1).max(2048), message_limit: z.number().int().min(1).max(30).optional() },
     annotations: { readOnlyHint: true, openWorldHint: false },
   }, handle(({ thread_id, cursor, message_limit }) => client.getThreadUpdates(thread_id, cursor, message_limit)));
