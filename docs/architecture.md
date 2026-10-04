@@ -23,7 +23,9 @@ MCP client
 
 [`src/t3/client.mjs`](../src/t3/client.mjs) owns project visibility checks, thread reads, cursor handling, and commands. It accepts `fetchImpl` and `rpcImpl` for tests. Its neighboring modules interpret pending questions, approvals, and model choices. These modules have no dependency on MCP transport or environment variables.
 
-[`src/t3/rpc.mjs`](../src/t3/rpc.mjs) handles authenticated WebSocket tickets and Effect RPC. Creating a thread requires `orchestration.dispatchCommand` with `bootstrap.createThread` over RPC. The HTTP dispatch endpoint handles commands for existing threads. Preserve this distinction when changing command handling.
+[`src/t3/rpc.mjs`](../src/t3/rpc.mjs) handles authenticated WebSocket tickets and Effect RPC. Both HTTP reads and WebSocket connections negotiate orchestration protocol 2. [`src/t3/protocol-v2.mjs`](../src/t3/protocol-v2.mjs) maps v2 shell status and thread projections to the bridge's public response format. Pending questions and approvals come from pending runtime requests and their turn items.
+
+On v2 servers, `orchestration.launchThread` creates threads. Follow-ups use `message.dispatch` and question or approval responses use `runtime-request.respond` through `orchestration.dispatchCommand`. The client retains legacy command handling for shell responses without v2 schema metadata.
 
 [`scripts/refresh-token.mjs`](../scripts/refresh-token.mjs) runs separately from the HTTP server. It obtains and replaces scoped credentials without exposing them to the MCP client.
 

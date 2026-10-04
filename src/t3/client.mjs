@@ -5,6 +5,7 @@ import { pendingUserInputs, validateInputAnswers } from "./pending-input.mjs";
 import { pendingApprovals } from "./pending-approval.mjs";
 import { callT3Rpc } from "./rpc.mjs";
 import { describeSelection, modelOptions, nextTurnModel, resolveModelSelection } from "./model-selection.mjs";
+import { isV2Shell, normalizeThreadDetail, normalizeThreadShell } from "./protocol-v2.mjs";
 
 const MAX_PROMPT_CHARS = 12_000;
 const MAX_TITLE_CHARS = 120;
@@ -123,6 +124,7 @@ export class T3Client {
       headers: {
         authorization: `Bearer ${token}`,
         accept: "application/json",
+        "x-t3-orchestration-protocol": "2",
         ...(body === undefined ? {} : { "content-type": "application/json" }),
       },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -143,7 +145,7 @@ export class T3Client {
     if (!Array.isArray(shell.projects) || !Array.isArray(shell.threads)) {
       throw new BridgeError("T3 returned an unexpected shell response.", 502);
     }
-    return shell;
+    return { ...shell, threads: shell.threads.map(normalizeThreadShell) };
   }
 
   allowedProject(shell, projectId) {
@@ -195,7 +197,7 @@ export class T3Client {
   }
 
   async threadDetail(threadId, turnLimit = 12) {
-    return this.request(`/api/orchestration/threads/${encodeURIComponent(threadId)}${turnLimit === null ? "" : `?turnLimit=${turnLimit}`}`);
+    return normalizeThreadDetail(await this.request(`/api/orchestration/threads/${encodeURIComponent(threadId)}${turnLimit === null ? "" : `?turnLimit=${turnLimit}`}`));
   }
 
   async detailWithPendingInput(threadId, turnLimit, initialDetail) {
@@ -352,7 +354,11 @@ export class T3Client {
     const request = pending.find((item) => item.request_id === requestId);
     if (!request) throw new BridgeError("This input request is no longer pending. Call get_thread for the current questions.", 409);
     const answers = validateInputAnswers(request, submittedAnswers);
-    await this.request("/api/orchestration/dispatch", {
+    if (isV2Shell(shell)) {
+      await this.rpc("orchestration.dispatchCommand", {
+        type: "runtime-request.respond", commandId: randomUUID(), threadId, requestId, answers,
+      });
+    } else await this.request("/api/orchestration/dispatch", {
       method: "POST",
       body: {
         type: "thread.user-input.respond",
@@ -387,7 +393,11 @@ export class T3Client {
     if (request.options.length && !request.options.some((option) => option.decision === decision)) {
       throw new BridgeError(`Decision '${decision}' is unavailable for this approval request.`, 400);
     }
-    await this.request("/api/orchestration/dispatch", { method: "POST", body: {
+    if (isV2Shell(shell)) {
+      await this.rpc("orchestration.dispatchCommand", {
+        type: "runtime-request.respond", commandId: randomUUID(), threadId, requestId, decision,
+      });
+    } else await this.request("/api/orchestration/dispatch", { method: "POST", body: {
       type: "thread.approval.respond", commandId: randomUUID(), threadId, requestId,
       decision, createdAt: new Date().toISOString(),
     } });
@@ -409,6 +419,16 @@ export class T3Client {
       : requireText(title, "title", MAX_TITLE_CHARS);
     const createdAt = new Date().toISOString();
     const threadId = randomUUID();
+    if (isV2Shell(shell)) {
+      await this.rpc("orchestration.launchThread", {
+        commandId: randomUUID(), threadId, projectId, title: threadTitle, generateTitle: title === undefined,
+        creationSource: "mcp", modelSelection: selection, runtimeMode, interactionMode: "default",
+        workspaceStrategy: { type: "root" },
+        initialMessage: { messageId: randomUUID(), text, attachments: [] },
+      });
+      return { thread_id: threadId, project_id: projectId, title: threadTitle, state: "queued", runtime_mode: runtimeMode,
+        requested_model: describeSelection(selection) };
+    }
     const command = {
       type: "thread.turn.start",
       commandId: randomUUID(),
@@ -446,7 +466,16 @@ export class T3Client {
     const selection = modelSelection === undefined ? undefined
       : resolveModelSelection(modelSelection, thread.modelSelection, await this.providers());
     const createdAt = new Date().toISOString();
-    await this.request("/api/orchestration/dispatch", {
+    if (isV2Shell(shell)) {
+      await this.rpc("orchestration.dispatchCommand", {
+        type: "message.dispatch", createdBy: "user", creationSource: "mcp", commandId: randomUUID(), threadId,
+        messageId: randomUUID(), text: requireText(prompt, "prompt", MAX_PROMPT_CHARS), attachments: [],
+        ...(selection === undefined ? {} : { modelSelection: selection }),
+        deliveryIntent: "auto",
+        dispatchMode: thread.activeRunId ? { type: "steer_active", targetRunId: thread.activeRunId }
+          : { type: "start_immediately" },
+      });
+    } else await this.request("/api/orchestration/dispatch", {
       method: "POST",
       body: {
         type: "thread.turn.start",

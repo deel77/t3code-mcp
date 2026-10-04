@@ -54,3 +54,7 @@ Through an authenticated MCP client, scan for all 13 tools, then call `list_proj
 Run `npm ci` and `npm test` in the new checkout before deploying it. The server entrypoint is `src/index.mjs`; credential maintenance uses `scripts/refresh-token.mjs`. Keep the full `src/` directory, `package.json`, and installed dependencies together. Keep credentials and deployment-specific configuration outside the checkout.
 
 Restart `t3code-mcp.service` after replacing application files. Repeat the access rejection and authenticated read checks above. Keep a copy of the deployed application and service units until the new deployment is verified.
+
+The bridge negotiates orchestration protocol 2 in HTTP headers and the WebSocket URL. T3Code versions requiring this protocol reject older bridges with HTTP 400 or a failed WebSocket connection. Verify thread messages and pending input as well as tool discovery after a T3Code update.
+
+When T3Code runs in another systemd service on the same host, add `After=t3code.service` and `Wants=t3code.service` to the bridge's unit. A `Requires=t3code.service` dependency stops the bridge when T3Code restarts and can leave it stopped if that restart fails. The bridge can remain running through an upstream outage and resume serving tools when T3Code recovers.

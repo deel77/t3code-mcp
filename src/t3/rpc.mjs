@@ -10,6 +10,7 @@ import { BridgeError } from "../errors.mjs";
 const group = RpcGroup.make(
   Rpc.make("server.getConfig", { payload: Schema.Struct({}), success: Schema.Unknown, error: Schema.Unknown }),
   Rpc.make("orchestration.dispatchCommand", { payload: Schema.Unknown, success: Schema.Unknown, error: Schema.Unknown }),
+  Rpc.make("orchestration.launchThread", { payload: Schema.Unknown, success: Schema.Unknown, error: Schema.Unknown }),
   Rpc.make("orchestration.searchThreads", { payload: Schema.Struct({ query: Schema.String, limit: Schema.optional(Schema.Number) }), success: Schema.Unknown, error: Schema.Unknown }),
   Rpc.make("orchestration.getTurnDiff", { payload: Schema.Struct({ threadId: Schema.String, fromTurnCount: Schema.Number, toTurnCount: Schema.Number, ignoreWhitespace: Schema.optional(Schema.Boolean) }), success: Schema.Unknown, error: Schema.Unknown }),
   Rpc.make("orchestration.subscribeThread", { payload: Schema.Struct({ threadId: Schema.String, afterSequence: Schema.Number, requestCompletionMarker: Schema.Boolean, turnLimit: Schema.optional(Schema.Number) }), success: Schema.Unknown, error: Schema.Unknown, stream: true }),
@@ -29,6 +30,7 @@ export async function callT3Rpc({ baseUrl, tokenFile, fetchImpl = fetch }, metho
   const url = new URL("/ws", baseUrl);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
   url.searchParams.set("wsTicket", ticket);
+  url.searchParams.set("orchestrationProtocol", "2");
   const protocol = RpcClient.layerProtocolSocket().pipe(
     Layer.provide(Socket.layerWebSocket(url.href, { openTimeout: "10 seconds" }).pipe(
       Layer.provide(Socket.layerWebSocketConstructorGlobal),
