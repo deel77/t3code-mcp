@@ -6,6 +6,7 @@ import { pendingApprovals } from "./pending-approval.mjs";
 import { callT3Rpc } from "./rpc.mjs";
 import { describeSelection, modelOptions, nextTurnModel, resolveModelSelection } from "./model-selection.mjs";
 import { isV2Shell, normalizeThreadDetail, normalizeThreadShell } from "./protocol-v2.mjs";
+import { stopThread } from "./stop-thread.mjs";
 
 const MAX_PROMPT_CHARS = 12_000;
 const MAX_TITLE_CHARS = 120;
@@ -46,6 +47,8 @@ const threadSummary = (thread, providers = []) => ({
   background_liveness: backgroundLiveness(thread),
   activity_status: activityStatus(thread),
   runtime_mode: thread.runtimeMode ?? null,
+  active_run_id: thread.activeRunId ?? null,
+  latest_run_id: thread.latestRunId ?? null,
   needs_approval: Boolean(thread.hasPendingApprovals),
   needs_user_input: Boolean(thread.hasPendingUserInput),
   has_actionable_plan: Boolean(thread.hasActionableProposedPlan),
@@ -95,6 +98,10 @@ const cursorFor = (thread, detail) => encodeCursor({
 });
 
 export class T3Client {
+  stopThread(threadId, projectId, runId, options) {
+    return stopThread(this, threadId, projectId, runId, options);
+  }
+
   constructor({ baseUrl, tokenFile, fetchImpl = fetch, rpcImpl = callT3Rpc }) {
     const url = new URL(baseUrl);
     if (url.protocol !== "http:" || url.username || url.password || url.search || url.hash) {
@@ -228,6 +235,9 @@ export class T3Client {
     const messages = Array.isArray(detail.thread?.messages) ? detail.thread.messages : [];
     return {
       ...threadSummary(summary),
+      runs: (detail.projection?.runs ?? []).map((run) => ({
+        id: run.id, status: run.status, queue_held: run.queueHeld === true,
+      })),
       messages: messages.filter((message) => message.role === "user" || message.role === "assistant")
         .slice(-safeLimit)
         .map(messageSummary),

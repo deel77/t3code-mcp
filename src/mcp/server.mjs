@@ -14,7 +14,7 @@ const runtimeModeSchema = z.enum(["full-access", "approval-required", "auto-acce
 export function createMcpServer(client) {
   const server = new McpServer(
     { name: "t3code-voice", version: packageJson.version },
-    { instructions: "For voice check-ins use list_attention, list_recent_threads and get_thread_updates. Use find_thread to locate a title across projects. Get a cursor from get_thread, then pass it to get_thread_updates for new messages and state changes. Use activity_status for overall progress: turn_state can be completed while background_liveness is working or monitoring. next_turn_model is the configured selection for a future turn; T3Code does not expose the actual model or reasoning level of the current turn. Use list_model_options before requesting a model override. Answer questions with answer_thread_input using exact option values. Read pending_approvals before using respond_thread_approval and ask the user to authorize the exact action. Start coding work only when the user asks." },
+    { instructions: "For voice check-ins use list_attention, list_recent_threads and get_thread_updates. Use find_thread to locate a title across projects. Get a cursor from get_thread, then pass it to get_thread_updates for new messages and state changes. Use activity_status for overall progress: turn_state can be completed while background_liveness is working or monitoring. next_turn_model is the configured selection for a future turn; T3Code does not expose the actual model or reasoning level of the current turn. Use list_model_options before requesting a model override. Answer questions with answer_thread_input using exact option values. Read pending_approvals before using respond_thread_approval and ask the user to authorize the exact action. To stop work, use stop_thread with the exact project, thread, and run IDs from get_thread. Never send a STOP prompt as cancellation. Retry using the same IDs; report stopped only when thread_stopped is true and verification is observed. Start coding work only when the user asks." },
   );
 
   const result = (value) => ({
@@ -68,7 +68,7 @@ export function createMcpServer(client) {
 
   server.registerTool("get_thread", {
     title: "Check a T3Code thread",
-    description: "Read latest messages, activity_status, background_liveness, configured next-turn model, unanswered questions, pending approvals, and a cursor for get_thread_updates. A completed turn may still have live background work. Approval details include request ID, action, type, options, and thread context.",
+    description: "Read latest messages, activity_status, background_liveness, configured next-turn model, unanswered questions, pending approvals, and a cursor for get_thread_updates. Returns project_id, active_run_id, latest_run_id and runs for exact stop_thread targeting. A completed turn may still have live background work. Approval details include request ID, action, type, options, and thread context.",
     inputSchema: { thread_id: z.string().min(1), message_limit: z.number().int().min(1).max(30).optional() },
     annotations: { readOnlyHint: true, openWorldHint: false },
   }, handle(({ thread_id, message_limit }) => client.getThread(thread_id, message_limit)));
@@ -123,7 +123,7 @@ export function createMcpServer(client) {
       prompt: z.string().min(1).max(12_000),
       title: z.string().min(1).max(120).optional(),
       model_selection: modelSelectionSchema.optional(),
-      runtime_mode: runtimeModeSchema.optional(),
+      runtime_mode: runtimeModeSchema.default("full-access"),
     },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false, idempotentHint: false },
   }, handle(({ project_id, prompt, title, model_selection, runtime_mode }) => client.startThread(project_id, prompt, title, model_selection, runtime_mode)));
@@ -134,6 +134,33 @@ export function createMcpServer(client) {
     inputSchema: { thread_id: z.string().min(1), prompt: z.string().min(1).max(12_000), model_selection: modelSelectionSchema.optional() },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false, idempotentHint: false },
   }, handle(({ thread_id, prompt, model_selection }) => client.sendFollowup(thread_id, prompt, model_selection)));
+
+  server.registerTool("stop_thread", {
+    title: "Stop a T3Code thread run",
+    description: "Request native cancellation of one exact run, even with pending approval or input. Read get_thread first; verify project_id and select run_id from runs. Use null only for a thread with no runs. Active stops hold the existing queue; queued stops cancel only the selected queued run. By default dismisses that run's asynchronous input and cancels its leftover approvals after the run becomes terminal. Retries with the same IDs are idempotent and never select a later run. Acceptance is not confirmation: check thread_stopped and verification. Existing files are not rolled back. Other runs, background work, or pending requests can keep thread_stopped false.",
+    inputSchema: {
+      thread_id: z.string().min(1).max(200),
+      project_id: z.string().min(1).max(200),
+      run_id: z.string().min(1).max(500).nullable(),
+      wait_ms: z.number().int().min(0).max(10000).optional(),
+      dismiss_pending_input: z.boolean().optional(),
+      cancel_pending_approvals: z.boolean().optional(),
+    },
+    outputSchema: {
+      thread_id: z.string(), project_id: z.string(), run_id: z.string().nullable(),
+      state: z.enum(["cancellation_requested", "confirmed_stopped", "already_terminal", "no_active_run", "outcome_unknown"]),
+      cancellation_requested: z.boolean(), command_ids: z.array(z.string()),
+      run_status: z.string().nullable(), thread_status: z.string(), thread_stopped: z.boolean(),
+      pending_request_ids: z.array(z.string()), active_run_ids: z.array(z.string()),
+      queued_run_ids: z.array(z.string()), held_queued_run_ids: z.array(z.string()),
+      background_work_count: z.number().nullable(), verification: z.enum(["observed", "unavailable"]),
+      warning: z.string().optional(),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false, idempotentHint: true },
+  }, handle(({ thread_id, project_id, run_id, wait_ms, dismiss_pending_input, cancel_pending_approvals }) =>
+    client.stopThread(thread_id, project_id, run_id, {
+      waitMs: wait_ms, dismissPendingInput: dismiss_pending_input, cancelPendingApprovals: cancel_pending_approvals,
+    })));
 
   return server;
 }

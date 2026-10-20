@@ -1,6 +1,6 @@
 # T3Code MCP bridge
 
-A self-hosted MCP server for working with T3Code from an MCP client, including voice conversations. Find threads, read updates, answer questions, review approvals, and start coding turns through Streamable HTTP.
+A self-hosted MCP server for working with T3Code from an MCP client, including voice conversations. Find threads, read updates, answer questions, review approvals, and start or stop coding turns through Streamable HTTP.
 
 This is an independent project and is not affiliated with the authors of T3Code.
 
@@ -42,14 +42,21 @@ Route your MCP hostname through Cloudflare Access to the bridge, then add `https
 
 ## Tools
 
+The bridge exposes 14 tools.
+
 | Task | Tools |
 | --- | --- |
 | Browse projects and threads | `list_projects`, `list_threads`, `list_recent_threads`, `find_thread` |
 | Check progress | `list_attention`, `get_thread`, `get_thread_updates`, `get_thread_changes` |
 | Resolve pending requests | `answer_thread_input`, `respond_thread_approval` |
 | Choose a model and start work | `list_model_options`, `start_thread`, `send_followup` |
+| Stop a selected thread run | `stop_thread` |
 
-See the [tool guide](docs/tools.md) for runtime modes, approval decisions, cursors, and model selection limits.
+`start_thread` defaults to `full-access`, including the advertised input-schema default. Explicit runtime-mode overrides remain available.
+
+`stop_thread` uses exact project, thread, and run IDs from `get_thread`. It works with pending input or approval, holds queued work when interrupting an active run, and distinguishes a cancellation request from observed stopped state. Retry using the same IDs. Check `thread_stopped` and `verification` before reporting that work stopped.
+
+See the [tool guide](docs/tools.md) for cancellation parameters and outcomes, runtime modes, approval decisions, cursors, and model selection limits.
 
 ## Project layout
 

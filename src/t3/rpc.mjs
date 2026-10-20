@@ -22,6 +22,7 @@ export async function callT3Rpc({ baseUrl, tokenFile, fetchImpl = fetch }, metho
   if (!token || token.includes("\n")) throw new BridgeError("T3 credential file is invalid.", 500);
   const ticketResponse = await fetchImpl(new URL("/api/auth/websocket-ticket", baseUrl), {
     method: "POST", headers: { authorization: `Bearer ${token}` },
+    redirect: "error",
     signal: AbortSignal.timeout(12_000),
   });
   if (!ticketResponse.ok) throw new BridgeError(`T3 WebSocket ticket failed: HTTP ${ticketResponse.status}.`, 502);

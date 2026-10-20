@@ -15,7 +15,7 @@ No T3Code server or Cloudflare account is needed for the tests. To run the bridg
 
 Keep tool schemas and descriptions in `src/mcp/`, HTTP transport in `src/http/`, and T3Code behavior in `src/t3/`. Read the [architecture guide](docs/architecture.md) for the request flow and the distinction between HTTP dispatch and bootstrap RPC.
 
-When fixing behavior, add a regression test at the client or MCP interface that demonstrates the failure. Changes to tool parameters or results should include integration coverage and an update to `docs/tools.md`. Run `npm test` before opening a pull request; use `npm run test:coverage` to inspect coverage locally.
+When fixing behavior, add a regression test at the client or MCP interface that demonstrates the failure. Changes to tools, parameters, defaults or results must include integration coverage and updates to `docs/tools.md` and the README Tools section. Check both documents against the registered `tools/list` metadata before committing. Run `npm test` before opening a pull request; use `npm run test:coverage` to inspect coverage locally.
 
 Use native ESM, two-space indentation, and LF line endings. Follow the surrounding code. Keep dependencies pinned and commit `package-lock.json` when changing them.
 

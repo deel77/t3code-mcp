@@ -27,6 +27,8 @@ MCP client
 
 On v2 servers, `orchestration.launchThread` creates threads. Follow-ups use `message.dispatch` and question or approval responses use `runtime-request.respond` through `orchestration.dispatchCommand`. The client retains legacy command handling for shell responses without v2 schema metadata.
 
+[`src/t3/stop-thread.mjs`](../src/t3/stop-thread.mjs) handles protocol-v2 cancellation using exact project, thread, and run IDs. Active stops use `run.interrupt` with queue holding; queued stops use `queued-run.cancel`. It dismisses eligible asynchronous input and cancels remaining selected-run approvals after terminalization. Stable command IDs support retries, and projection plus shell reads distinguish command acceptance from observed stopped state. Legacy backends fail closed for this tool.
+
 [`scripts/refresh-token.mjs`](../scripts/refresh-token.mjs) runs separately from the HTTP server. It obtains and replaces scoped credentials without exposing them to the MCP client.
 
 ## Tests
