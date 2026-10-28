@@ -1,6 +1,6 @@
 # T3Code MCP bridge
 
-A self-hosted MCP server for working with T3Code from an MCP client, including voice conversations. Find threads, read updates, answer questions, review approvals, and start or stop coding turns through Streamable HTTP.
+A self-hosted MCP server for working with T3Code from an MCP client, including voice conversations. Find threads, read updates, answer questions, review approvals, start or stop coding turns, and settle or archive threads through Streamable HTTP.
 
 This is an independent project and is not affiliated with the authors of T3Code.
 
@@ -42,7 +42,7 @@ Route your MCP hostname through Cloudflare Access to the bridge, then add `https
 
 ## Tools
 
-The bridge exposes 14 tools.
+The bridge exposes 18 tools.
 
 | Task | Tools |
 | --- | --- |
@@ -51,12 +51,15 @@ The bridge exposes 14 tools.
 | Resolve pending requests | `answer_thread_input`, `respond_thread_approval` |
 | Choose a model and start work | `list_model_options`, `start_thread`, `send_followup` |
 | Stop a selected thread run | `stop_thread` |
+| Mark done or tidy up threads | `settle_thread`, `unsettle_thread`, `archive_thread`, `unarchive_thread` |
 
 `start_thread` defaults to `full-access`, including the advertised input-schema default. Explicit runtime-mode overrides remain available.
 
 `stop_thread` uses exact project, thread, and run IDs from `get_thread`. It works with pending input or approval, holds queued work when interrupting an active run, and distinguishes a cancellation request from observed stopped state. Retry using the same IDs. Check `thread_stopped` and `verification` before reporting that work stopped.
 
-See the [tool guide](docs/tools.md) for cancellation parameters and outcomes, runtime modes, approval decisions, cursors, and model selection limits.
+Settled, completed and archived are separate states. A completed run (`turn_state`, `activity_status`) is not Settled. `settled` is T3Code's done marker. `archived` hides a thread from the lists and can be undone. The four lifecycle tools take exact `project_id` and `thread_id` values. Before sending anything, they refuse running, blocked, queued, archived-for-settle and subagent threads. A repeated call on a thread already in that state is a no-op, and each call reports the state read back from T3Code. Settling and archiving stop idle background work only with `stop_background_work: true`. Settling cancels unanswered asynchronous questions only with `cancel_pending_input: true`. Use `find_thread` with `include_archived` to locate an archived thread.
+
+See the [tool guide](docs/tools.md) for cancellation and lifecycle parameters and outcomes, runtime modes, approval decisions, cursors, and model selection limits.
 
 ## Project layout
 

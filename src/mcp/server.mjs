@@ -10,11 +10,25 @@ const modelSelectionSchema = z.object({
   reasoning_level: z.string().min(1).optional(),
 }).strict();
 const runtimeModeSchema = z.enum(["full-access", "approval-required", "auto-accept-edits", "auto"]);
+const lifecycleTarget = {
+  thread_id: z.string().min(1).max(200),
+  project_id: z.string().min(1).max(200),
+  wait_ms: z.number().int().min(0).max(10000).optional(),
+};
+const lifecycleOutput = {
+  thread_id: z.string(), project_id: z.string(), action: z.enum(["settle", "unsettle", "archive", "unarchive"]),
+  state: z.enum(["applied", "already_in_state", "requested", "outcome_unknown"]),
+  changed: z.boolean(), command_id: z.string().nullable(), title: z.string(),
+  settled: z.boolean(), settled_at: z.string().nullable(), archived: z.boolean(), archived_at: z.string().nullable(),
+  thread_status: z.string().nullable(), latest_run_id: z.string().nullable(),
+  verification: z.enum(["observed", "unavailable"]), effects: z.array(z.string()), warning: z.string().optional(),
+};
+const lifecycleResultNote = "Report the change only when state is applied or already_in_state and verification is observed.";
 
 export function createMcpServer(client) {
   const server = new McpServer(
     { name: "t3code-voice", version: packageJson.version },
-    { instructions: "For voice check-ins use list_attention, list_recent_threads and get_thread_updates. Use find_thread to locate a title across projects. Get a cursor from get_thread, then pass it to get_thread_updates for new messages and state changes. Use activity_status for overall progress: turn_state can be completed while background_liveness is working or monitoring. next_turn_model is the configured selection for a future turn; T3Code does not expose the actual model or reasoning level of the current turn. Use list_model_options before requesting a model override. Answer questions with answer_thread_input using exact option values. Read pending_approvals before using respond_thread_approval and ask the user to authorize the exact action. To stop work, use stop_thread with the exact project, thread, and run IDs from get_thread. Never send a STOP prompt as cancellation. Retry using the same IDs; report stopped only when thread_stopped is true and verification is observed. Start coding work only when the user asks." },
+    { instructions: "For voice check-ins use list_attention, list_recent_threads and get_thread_updates. Use find_thread to locate a title across projects. Get a cursor from get_thread, then pass it to get_thread_updates for new messages and state changes. Use activity_status for overall progress: turn_state can be completed while background_liveness is working or monitoring. next_turn_model is the configured selection for a future turn; T3Code does not expose the actual model or reasoning level of the current turn. Use list_model_options before requesting a model override. Answer questions with answer_thread_input using exact option values. Read pending_approvals before using respond_thread_approval and ask the user to authorize the exact action. To stop work, use stop_thread with the exact project, thread, and run IDs from get_thread. Never send a STOP prompt as cancellation. Retry using the same IDs; report stopped only when thread_stopped is true and verification is observed. Settled is the user's done marker in T3Code: it is separate from a completed run (thread_status) and from archived. Use settle_thread, unsettle_thread, archive_thread and unarchive_thread only when the user asks, with the exact project and thread IDs from get_thread, and report the observed settled and archived fields. Start coding work only when the user asks." },
   );
 
   const result = (value) => ({
@@ -61,14 +75,14 @@ export function createMcpServer(client) {
 
   server.registerTool("find_thread", {
     title: "Find a T3Code thread",
-    description: "Search thread titles across every owned project without a project ID. Results include activity_status and background_liveness. Optionally also search user and assistant message text.",
-    inputSchema: { query: z.string().min(1).max(200), limit: z.number().int().min(1).max(30).optional(), search_messages: z.boolean().optional() },
+    description: "Search thread titles across every owned project without a project ID. Results include activity_status, background_liveness, settled and archived. Optionally also search user and assistant message text. Set include_archived to find archived threads, for example before unarchive_thread.",
+    inputSchema: { query: z.string().min(1).max(200), limit: z.number().int().min(1).max(30).optional(), search_messages: z.boolean().optional(), include_archived: z.boolean().optional() },
     annotations: { readOnlyHint: true, openWorldHint: false },
-  }, handle(({ query, limit, search_messages }) => client.findThread(query, limit, search_messages)));
+  }, handle(({ query, limit, search_messages, include_archived }) => client.findThread(query, limit, search_messages, include_archived)));
 
   server.registerTool("get_thread", {
     title: "Check a T3Code thread",
-    description: "Read latest messages, activity_status, background_liveness, configured next-turn model, unanswered questions, pending approvals, and a cursor for get_thread_updates. Returns project_id, active_run_id, latest_run_id and runs for exact stop_thread targeting. A completed turn may still have live background work. Approval details include request ID, action, type, options, and thread context.",
+    description: "Read latest messages, activity_status, background_liveness, settled and archived state, configured next-turn model, unanswered questions, pending approvals, and a cursor for get_thread_updates. Also reads archived threads. Returns project_id, active_run_id, latest_run_id and runs for exact stop_thread targeting. A completed turn may still have live background work. Approval details include request ID, action, type, options, and thread context.",
     inputSchema: { thread_id: z.string().min(1), message_limit: z.number().int().min(1).max(30).optional() },
     annotations: { readOnlyHint: true, openWorldHint: false },
   }, handle(({ thread_id, message_limit }) => client.getThread(thread_id, message_limit)));
@@ -161,6 +175,42 @@ export function createMcpServer(client) {
     client.stopThread(thread_id, project_id, run_id, {
       waitMs: wait_ms, dismissPendingInput: dismiss_pending_input, cancelPendingApprovals: cancel_pending_approvals,
     })));
+
+  server.registerTool("settle_thread", {
+    title: "Mark a T3Code thread Settled",
+    description: "Mark one thread Settled, T3Code's done marker that moves it to the Settled section. This is not the same as a completed run or archiving. Read get_thread first and pass its exact project_id and thread_id. Refuses before any change while the thread runs, waits on an approval or question, has a queued message, is archived, or is a subagent thread. Unanswered asynchronous questions or background tasks also block it unless cancel_pending_input or stop_background_work is true. Settling unpins the thread and clears any snooze. Calling it on an already Settled thread changes nothing. " + lifecycleResultNote,
+    inputSchema: { ...lifecycleTarget, cancel_pending_input: z.boolean().optional(), stop_background_work: z.boolean().optional() },
+    outputSchema: lifecycleOutput,
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false, idempotentHint: true },
+  }, handle(({ thread_id, project_id, wait_ms, cancel_pending_input, stop_background_work }) => client.settleThread(thread_id, project_id, {
+    waitMs: wait_ms, cancelPendingInput: cancel_pending_input, stopBackgroundWork: stop_background_work,
+  })));
+
+  server.registerTool("unsettle_thread", {
+    title: "Remove Settled from a T3Code thread",
+    description: "Return one Settled thread to the active list. T3Code then keeps it active and skips auto-settling until new activity. Pass the exact project_id and thread_id. Archived threads must be unarchived first. Calling it on a thread that is not Settled changes nothing. " + lifecycleResultNote,
+    inputSchema: lifecycleTarget,
+    outputSchema: lifecycleOutput,
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false, idempotentHint: true },
+  }, handle(({ thread_id, project_id, wait_ms }) => client.unsettleThread(thread_id, project_id, { waitMs: wait_ms })));
+
+  server.registerTool("archive_thread", {
+    title: "Archive a T3Code thread",
+    description: "Archive one thread, hiding it from the thread lists. It stays readable and can be restored with unarchive_thread. Pass the exact project_id and thread_id from get_thread. Refuses before any change while the thread runs, waits on an approval or question, has queued runs, or is a subagent thread. Background tasks also block it unless stop_background_work is true. Archiving closes the thread's terminals and revokes its agent MCP credential. Calling it on an archived thread changes nothing. " + lifecycleResultNote,
+    inputSchema: { ...lifecycleTarget, stop_background_work: z.boolean().optional() },
+    outputSchema: lifecycleOutput,
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false, idempotentHint: true },
+  }, handle(({ thread_id, project_id, wait_ms, stop_background_work }) => client.archiveThread(thread_id, project_id, {
+    waitMs: wait_ms, stopBackgroundWork: stop_background_work,
+  })));
+
+  server.registerTool("unarchive_thread", {
+    title: "Unarchive a T3Code thread",
+    description: "Restore one archived thread to the thread lists. Its Settled state is kept. Find it with find_thread include_archived and pass the exact project_id and thread_id. Calling it on a thread that is not archived changes nothing. " + lifecycleResultNote,
+    inputSchema: lifecycleTarget,
+    outputSchema: lifecycleOutput,
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false, idempotentHint: true },
+  }, handle(({ thread_id, project_id, wait_ms }) => client.unarchiveThread(thread_id, project_id, { waitMs: wait_ms })));
 
   return server;
 }

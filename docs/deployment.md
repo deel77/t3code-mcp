@@ -47,7 +47,7 @@ An unauthenticated local POST should return `403`:
 curl -i -X POST http://127.0.0.1:3993/mcp
 ```
 
-Through an authenticated MCP client, scan for all 13 tools, then call `list_projects`, `list_model_options`, and `list_recent_threads`. Read an existing thread with `get_thread`, and pass its `updates_cursor` to `get_thread_updates`. Start a turn only when you intend T3Code to do work.
+Through an authenticated MCP client, scan for all 18 tools, then call `list_projects`, `list_model_options`, and `list_recent_threads`. Read an existing thread with `get_thread`, and pass its `updates_cursor` to `get_thread_updates`. Start a turn only when you intend T3Code to do work.
 
 ## Application updates
 

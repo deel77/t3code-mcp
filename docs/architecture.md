@@ -29,12 +29,14 @@ On v2 servers, `orchestration.launchThread` creates threads. Follow-ups use `mes
 
 [`src/t3/stop-thread.mjs`](../src/t3/stop-thread.mjs) handles protocol-v2 cancellation using exact project, thread, and run IDs. Active stops use `run.interrupt` with queue holding; queued stops use `queued-run.cancel`. It dismisses eligible asynchronous input and cancels remaining selected-run approvals after terminalization. Stable command IDs support retries, and projection plus shell reads distinguish command acceptance from observed stopped state. Legacy backends fail closed for this tool.
 
+[`src/t3/thread-lifecycle.mjs`](../src/t3/thread-lifecycle.mjs) handles Settled and archive transitions with `thread.settle`, `thread.unsettle`, `thread.archive` and `thread.unarchive`. Protocol-2 HTTP shells list only unarchived threads, so it also reads `orchestration.getArchivedShellSnapshot` to locate archived threads. It checks project ownership and blocking run or request state before dispatch, skips commands for threads already in the requested state, and reads the state back. [`src/t3/rpc.mjs`](../src/t3/rpc.mjs) passes T3Code's bounded explanation for a rejected dispatch, so callers can distinguish a definite rejection from a transport failure.
+
 [`scripts/refresh-token.mjs`](../scripts/refresh-token.mjs) runs separately from the HTTP server. It obtains and replaces scoped credentials without exposing them to the MCP client.
 
 ## Tests
 
 - `tests/unit/` exercises T3Code client behavior using simulated HTTP and RPC responses, plus configuration and response interpretation.
-- `tests/integration/` sends actual JSON-RPC requests through a local HTTP MCP server with a simulated T3Code backend. It covers tool discovery, access gating, thread creation, input answers, and approval decisions.
+- `tests/integration/` sends actual JSON-RPC requests through a local HTTP MCP server with a simulated T3Code backend. It covers tool discovery, access gating, thread creation, input answers, approval decisions, cancellation, and Settled and archive changes.
 - `tests/helpers/` provides temporary credentials and shared T3Code fixtures.
 
 Automated tests do not prove compatibility with every T3Code deployment. Use the authenticated read checks in the deployment guide after updating the bridge or T3Code.

@@ -1,6 +1,6 @@
 # MCP tools
 
-The bridge exposes 14 tools. The table and cancellation contract below describe the registered tools in this repository.
+The bridge exposes 18 tools. The table, cancellation contract and thread lifecycle contract below describe the registered tools in this repository.
 
 | Tool | Purpose |
 | --- | --- |
@@ -8,8 +8,8 @@ The bridge exposes 14 tools. The table and cancellation contract below describe 
 | `list_threads` | List recent threads in one project. |
 | `list_recent_threads` | List recently changed threads across projects. |
 | `list_attention` | Find threads awaiting input or approval, or showing an error. |
-| `find_thread` | Search thread titles across projects, optionally including message text. |
-| `get_thread` | Read recent messages, pending requests, status, exact run IDs, and an updates cursor. |
+| `find_thread` | Search thread titles across projects, optionally including message text or archived threads. |
+| `get_thread` | Read recent messages, pending requests, status, Settled and archived state, exact run IDs, and an updates cursor. Also reads archived threads. |
 | `get_thread_updates` | Read messages and state changed since a cursor. |
 | `get_thread_changes` | Read checkpoint file changes and an optional bounded diff. |
 | `list_model_options` | Read live provider, model, and reasoning choices. |
@@ -18,6 +18,10 @@ The bridge exposes 14 tools. The table and cancellation contract below describe 
 | `start_thread` | Start a thread with optional model selection and runtime mode. |
 | `send_followup` | Send another prompt with an optional model selection. |
 | `stop_thread` | Stop one exact thread run, including work awaiting input or approval, and report whether stopped state was observed. |
+| `settle_thread` | Mark one exact thread Settled. |
+| `unsettle_thread` | Return one Settled thread to the active list. |
+| `archive_thread` | Archive one exact thread. |
+| `unarchive_thread` | Restore one archived thread. |
 
 `start_thread` defaults to `full-access` in both the client and advertised input schema. Set `runtime_mode` to `approval-required`, `auto-accept-edits`, or `auto` to use another T3Code mode. `send_followup` keeps an existing thread's mode. Changing the mode of an existing thread is not exposed as an MCP tool.
 
@@ -61,6 +65,52 @@ Retries with the same project, thread, and run IDs derive the same durable comma
 
 Stop does not roll back files or completed external actions. Detached background work and non-resumable requests can require inspection in T3Code. A terminal run with background work is reported as not confirmed stopped; the bridge does not interrupt an old terminal provider session that may now be shared with a newer turn. Sending a `STOP` follow-up or cancelling one approval is not equivalent to stopping a run.
 
+## Settled, completed and archived
+
+These are three independent T3Code states. Thread summaries and `get_thread` report all of them:
+
+| Field | Meaning | Changed by |
+| --- | --- | --- |
+| `turn_state`, `activity_status` | Execution state of the latest run, for example `running` or `completed`. A completed run is not Settled. | T3Code and the provider |
+| `settled`, `settled_at` | The user's done marker. Settled threads move to T3Code's Settled section and stay readable. T3Code can also settle threads automatically after a configured number of inactive days. | `settle_thread`, `unsettle_thread`, T3Code UI, auto-settle |
+| `archived`, `archived_at` | The thread is hidden from thread lists, but remains readable and restorable. | `archive_thread`, `unarchive_thread`, T3Code UI |
+
+`list_threads`, `list_recent_threads`, `list_attention` and `find_thread` omit archived threads. Set `include_archived: true` on `find_thread` to include archived threads in its results. `get_thread` reads an archived thread by ID.
+
+## Change Settled or archived state
+
+All four tools require the exact `project_id` and `thread_id` from `get_thread` or `find_thread`. There are no title, wildcard or bulk inputs. The project must be visible to the bridge credential and the thread must belong to it. Unknown, deleted or foreign threads fail before any command is sent. Each tool sends one native T3Code command through `orchestration.dispatchCommand`: `thread.settle`, `thread.unsettle` with reason `user`, `thread.archive`, or `thread.unarchive`. These are the commands the T3Code UI sends.
+
+```json
+{
+  "thread_id": "EXACT_THREAD_ID",
+  "project_id": "EXPECTED_PROJECT_ID",
+  "wait_ms": 2000
+}
+```
+
+`wait_ms` defaults to 2000 and allows 0 through 10000. It bounds how long the bridge reads the thread back after the command. Zero still performs one read.
+
+| Tool | Refuses before any change when | Optional inputs | Side effects in T3Code |
+| --- | --- | --- | --- |
+| `settle_thread` | A run is preparing, starting, running or waiting; an approval or callback question is pending; a user message is queued; the thread is archived; the thread is a subagent thread. Unanswered asynchronous questions and background tasks also block it unless the matching option is true. | `cancel_pending_input`, `stop_background_work`, both default false | Cancels opted-in asynchronous questions and automatically queued notification runs, stops idle background work, unpins the thread and clears its snooze. |
+| `unsettle_thread` | The thread is archived. | none | Marks the thread explicitly active, so auto-settle skips it until new activity. |
+| `archive_thread` | A run is active or queued; any request is pending; the thread is a subagent thread. Background tasks block it unless `stop_background_work` is true. | `stop_background_work`, default false | Hides the thread, stops idle background work, closes its terminals and revokes the thread agent's MCP credential. Settled state is kept. |
+| `unarchive_thread` | Nothing beyond exact targeting. | none | Restores the thread to the lists with its previous Settled state. |
+
+Use `stop_thread` before settling or archiving running work. Refusals and T3Code's own rejections return `isError: true` with the reason and end with "No change was made". A T3Code rejection includes T3Code's bounded explanation, for example that a thread is not archived.
+
+| Response `state` | Meaning |
+| --- | --- |
+| `applied` | The command was accepted and a later read observed the requested state. |
+| `already_in_state` | The thread was already in the requested state. No command was sent. |
+| `requested` | T3Code accepted the command, but the new state was not observed within `wait_ms`. |
+| `outcome_unknown` | The command reply or the read-back failed. Read the thread before retrying. |
+
+Report a change only for `applied` or `already_in_state` with `verification: "observed"`. Responses include `changed`, `command_id`, `title`, `settled`, `settled_at`, `archived`, `archived_at`, `thread_status`, `latest_run_id` and an `effects` list describing T3Code side effects for this call.
+
+Command IDs are SHA-256 hashes of the project, thread, command and the observed starting state. A retry from the same state reuses the ID, which T3Code deduplicates. A later reversal starts from a different state and gets a new ID. Calling a tool again after success returns `already_in_state` without sending anything.
+
 ## Approvals, models and progress
 
 `get_thread`, `get_thread_updates`, and `list_attention` expose `pending_approvals`. Each item includes its request ID, type, action text, provider options when available, and project/thread context. T3Code can omit action text or options. `respond_thread_approval` accepts the decisions `accept`, `acceptForSession`, `acceptAlways`, `decline`, and `cancel`; it rejects a stale request or a decision absent from provider-supplied options. Review the exact action before sending a decision.
@@ -79,5 +129,6 @@ Thread summaries and details include `turn_state`, `session_status`, `background
 4. Answer questions with `answer_thread_input`. Review the requested action and scope with the user before calling `respond_thread_approval`.
 5. Pass the cursor to `get_thread_updates` on the next check. Keep the returned cursor for later checks.
 6. When the user asks to stop work, use `stop_thread` with the selected project, thread and run IDs. Check the returned observation before reporting completion.
+7. When the user marks work done or wants it out of the list, use `settle_thread` or `archive_thread` with the project and thread IDs. To restore, use `unsettle_thread`, or find the thread with `find_thread` and `include_archived`, then use `unarchive_thread`.
 
 Tool schemas returned by `tools/list` are the source for exact parameters and limits. Tool results include both JSON text and `structuredContent`. Expected bridge errors return `isError: true` with an explanation. Unexpected internal errors return a generic message.

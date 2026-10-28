@@ -180,7 +180,7 @@ test("HTTP MCP requires access verification before listing tools", async () => {
     const allowed = await fetch(url, { method: "POST", headers: { ...headers, "cf-access-jwt-assertion": "valid-test" }, body });
     assert.equal(allowed.status, 200);
     const data = await allowed.json();
-    assert.deepEqual(data.result.tools.map((tool) => tool.name), ["list_projects", "list_threads", "list_recent_threads", "list_attention", "find_thread", "get_thread", "get_thread_updates", "get_thread_changes", "list_model_options", "answer_thread_input", "respond_thread_approval", "start_thread", "send_followup", "stop_thread"]);
+    assert.deepEqual(data.result.tools.map((tool) => tool.name), ["list_projects", "list_threads", "list_recent_threads", "list_attention", "find_thread", "get_thread", "get_thread_updates", "get_thread_changes", "list_model_options", "answer_thread_input", "respond_thread_approval", "start_thread", "send_followup", "stop_thread", "settle_thread", "unsettle_thread", "archive_thread", "unarchive_thread"]);
     const startTool = data.result.tools.find((tool) => tool.name === "start_thread");
     assert.equal(startTool.inputSchema.properties.runtime_mode.default, "full-access");
     assert.equal(startTool.inputSchema.required.includes("runtime_mode"), false);

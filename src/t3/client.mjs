@@ -7,6 +7,7 @@ import { callT3Rpc } from "./rpc.mjs";
 import { describeSelection, modelOptions, nextTurnModel, resolveModelSelection } from "./model-selection.mjs";
 import { isV2Shell, normalizeThreadDetail, normalizeThreadShell } from "./protocol-v2.mjs";
 import { stopThread } from "./stop-thread.mjs";
+import { changeThreadLifecycle } from "./thread-lifecycle.mjs";
 
 const MAX_PROMPT_CHARS = 12_000;
 const MAX_TITLE_CHARS = 120;
@@ -53,6 +54,10 @@ const threadSummary = (thread, providers = []) => ({
   needs_user_input: Boolean(thread.hasPendingUserInput),
   has_actionable_plan: Boolean(thread.hasActionableProposedPlan),
   next_turn_model: nextTurnModel(thread, providers),
+  settled: thread.settledOverride === "settled" && thread.settledAt != null,
+  settled_at: thread.settledOverride === "settled" ? thread.settledAt ?? null : null,
+  archived: thread.archivedAt != null,
+  archived_at: thread.archivedAt ?? null,
 });
 
 const messageSummary = (message) => ({
@@ -100,6 +105,22 @@ const cursorFor = (thread, detail) => encodeCursor({
 export class T3Client {
   stopThread(threadId, projectId, runId, options) {
     return stopThread(this, threadId, projectId, runId, options);
+  }
+
+  settleThread(threadId, projectId, options) {
+    return changeThreadLifecycle(this, "settle", threadId, projectId, options);
+  }
+
+  unsettleThread(threadId, projectId, options) {
+    return changeThreadLifecycle(this, "unsettle", threadId, projectId, options);
+  }
+
+  archiveThread(threadId, projectId, options) {
+    return changeThreadLifecycle(this, "archive", threadId, projectId, options);
+  }
+
+  unarchiveThread(threadId, projectId, options) {
+    return changeThreadLifecycle(this, "unarchive", threadId, projectId, options);
   }
 
   constructor({ baseUrl, tokenFile, fetchImpl = fetch, rpcImpl = callT3Rpc }) {
@@ -153,6 +174,19 @@ export class T3Client {
       throw new BridgeError("T3 returned an unexpected shell response.", 502);
     }
     return { ...shell, threads: shell.threads.map(normalizeThreadShell) };
+  }
+
+  // Protocol-2 shells list only unarchived threads; archived ones need this read.
+  async archivedShell() {
+    const archived = await this.rpc("orchestration.getArchivedShellSnapshot", {});
+    if (!Array.isArray(archived?.threads)) throw new BridgeError("T3 returned an unexpected archived thread list.", 502);
+    return { ...archived, threads: archived.threads.map(normalizeThreadShell) };
+  }
+
+  async allowedThreadIncludingArchived(shell, threadId) {
+    if (!isV2Shell(shell) || shell.threads.some((item) => item.id === threadId)) return this.allowedThread(shell, threadId);
+    const archived = (await this.archivedShell()).threads.find((item) => item.id === threadId);
+    return this.allowedThread({ ...shell, threads: archived && !archived.deletedAt ? [archived] : [] }, threadId);
   }
 
   allowedProject(shell, projectId) {
@@ -219,7 +253,7 @@ export class T3Client {
 
   async getThread(threadId, messageLimit = 12) {
     const shell = await this.shell();
-    const summary = this.allowedThread(shell, threadId);
+    const summary = await this.allowedThreadIncludingArchived(shell, threadId);
     const safeLimit = Math.min(Math.max(messageLimit, 1), 30);
     let detail = await this.threadDetail(threadId, safeLimit);
     let pending = pendingUserInputs(detail.thread?.activities);
@@ -271,11 +305,13 @@ export class T3Client {
     return { threads: withInputs };
   }
 
-  async findThread(query, limit = 10, searchMessages = false) {
+  async findThread(query, limit = 10, searchMessages = false, includeArchived = false) {
     const text = requireText(query, "query", 200).toLowerCase();
     const shell = await this.shell();
     const projects = new Map(shell.projects.map((project) => [project.id, project]));
-    const allowed = shell.threads.filter((thread) => !thread.archivedAt && projects.has(thread.projectId));
+    const archived = includeArchived && isV2Shell(shell) ? (await this.archivedShell()).threads : [];
+    const allowed = [...shell.threads.filter((thread) => !thread.archivedAt), ...archived]
+      .filter((thread) => !thread.deletedAt && projects.has(thread.projectId));
     const rank = (title) => title.toLowerCase() === text ? 0 : title.toLowerCase().startsWith(text) ? 1 : 2;
     const titleMatches = allowed.filter((thread) => thread.title.toLowerCase().includes(text))
       .sort((a, b) => rank(a.title) - rank(b.title) || b.updatedAt.localeCompare(a.updatedAt));
